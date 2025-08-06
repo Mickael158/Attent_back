@@ -15,12 +15,12 @@ const refreshTokenMiddleware = async (req, res, next) => {
         const user = await User.findById(decoded.id); // Recherche l'utilisateur par ID
 
         if (!user) {
-            return res.status(403).json({ message: 'Token invalide ou utilisateur non trouvé.' });
+            return res.status(401).json({ message: 'Token invalide ou utilisateur non trouvé.' });
         }
 
         jwt.verify(token, SECRET_KEY, (err) => {
             if (err) {
-                return res.status(403).json({ message: 'Token invalide. Accès interdit.' });
+                return res.status(401).json({ message: 'Token invalide. Accès interdit.' });
             }
             req.user = user;
             next();

@@ -13,7 +13,7 @@ const roleMiddleware = (roles) => {
 
             if (!roles.includes(user.idRoles.nom)) {
                 return res.status(403).json({ message: 'Accès interdit : rôle non autorisé.' });
-            }
+            } 
 
             next(); 
         } catch (error) {

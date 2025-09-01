@@ -80,16 +80,16 @@ router.put('/validate/:id',refreshTokenMiddleware, roleMiddleware(['admin']), as
     });
     await occupation.save();
 
-    // b) Insère l'utilisateur dans la collection Place avec des données par défaut
+    // b) Insère l'utilisateur dans la collection Place avec des données uniques
     const place = new Place({
       user: user._id,
-      numero: `BOX-ParDefaut`, // Génère un numéro unique basé sur les 4 derniers caractères de l'ID
-      ref_place: `REF-ParDefaut` // Génère une référence basée sur le timestamp
+      numero: `BOX-${user._id.toString().slice(-4)}`, // Numéro unique basé sur les 4 derniers caractères de l'ID
+      ref_place: `REF-${Date.now()}` // Référence unique basée sur le timestamp
     });
     await place.save();
 
     // c) Insère l'utilisateur dans la collection Tache pour chaque prestation
-    const prestations = await Prestation.find(); // Récupère toutes les prestations
+    const prestations = await Prestation.find().lean(); // Utilise lean() pour performances
     if (prestations.length === 0) {
       console.warn('Aucune prestation trouvée pour créer des tâches');
     }
@@ -105,7 +105,14 @@ router.put('/validate/:id',refreshTokenMiddleware, roleMiddleware(['admin']), as
     // Envoie une réponse de succès au frontend
     res.json({ message: 'Utilisateur validé avec succès' });
   } catch (error) {
-    // Gère les erreurs serveur (par exemple, échec de sauvegarde ou problème avec Prestation)
+    // Gère les erreurs spécifiques
+    if (error.code === 11000) {
+      // Erreur de clé dupliquée (par exemple, numero ou ref_place)
+      console.error('Erreur de clé dupliquée dans Place:', error);
+      return res.status(400).json({ message: 'Erreur : numéro ou référence de place déjà utilisé' });
+    }
+
+    // Gère les autres erreurs serveur
     console.error('Erreur lors de la validation de l\'utilisateur :', error);
     res.status(500).json({ message: 'Erreur serveur lors de la validation de l\'utilisateur' });
   }

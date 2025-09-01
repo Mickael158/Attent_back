@@ -117,7 +117,7 @@ router.post('/token', async (req, res) => {
             if (err) {
                 return res.status(403).json({ message: 'Refresh token invalide ou expiré' });
             }
-            const accessToken = jwt.sign({ id: user._id, role: user.idRoles.nom }, SECRET_KEY, { expiresIn: '1m' });
+            const accessToken = jwt.sign({ id: user._id, role: user.idRoles.nom }, SECRET_KEY, { expiresIn: '10m' });
             res.json({ accessToken });
         });
     } catch (error) {

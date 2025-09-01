@@ -44,63 +44,88 @@ router.post('/assign', refreshTokenMiddleware, roleMiddleware(['admin', 'afficha
       return res.status(404).json({ message: 'Aucun utilisateur avec le rôle "box" disponible.' });
     }
 
-    // Étape 4 : Pour le premier client, trouver un utilisateur libre avec la tâche appropriée
-    const client = clients[0]; // Premier client en attente
-    const prestationId = client.id_prestation;
+    // Étape 4 : Itérer sur les clients pour trouver un utilisateur libre
+    let assigned = false;
+    let responseData = null;
 
-    // Trouver les utilisateurs libres (Occupation active) avec la tâche active pour la prestation
-    const availableUsers = await Promise.all(
-      boxUsers.map(async (user) => {
-        const isActive = await Occupation.findOne({
-          users: user._id,
-          status: 'active'
-        });
+    for (const client of clients) {
+      const prestationId = client.id_prestation;
 
-        const hasTache = await Tache.findOne({
-          user: user._id,
-          prestation: prestationId,
-          status: 'active'
-        });
+      // Trouver les utilisateurs libres (Occupation active) avec la tâche active pour la prestation
+      const availableUsers = await Promise.all(
+        boxUsers.map(async (user) => {
+          const isActive = await Occupation.findOne({
+            users: user._id,
+            status: 'active'
+          });
 
-        return isActive && hasTache ? user : null;
-      })
-    );
+          const hasTache = await Tache.findOne({
+            user: user._id,
+            prestation: prestationId,
+            status: 'active'
+          });
 
-    const freeUser = availableUsers.find(user => user !== null);
+          return isActive && hasTache ? user : null;
+        })
+      );
 
-    if (!freeUser) {
-      return res.status(404).json({ message: 'Aucun utilisateur "box" libre avec la tâche requise.' });
-    }
+      const freeUser = availableUsers.find(user => user !== null);
 
-    // Étape 5 : Trouver la place associée à l'utilisateur
-    const place = await Place.findOne({ user: freeUser._id });
-    if (!place) {
-      return res.status(404).json({ message: 'Aucune place associée à l\'utilisateur.' });
-    }
-
-    // Étape 6 : Créer un nouvel appel
-    const newAppel = new Appel({
-      user: freeUser._id,
-      liste: client._id,
-      date: new Date()
-    });
-
-    await newAppel.save();
-
-    // Étape 7 : Réponse avec les détails
-    res.status(201).json({
-      message: 'Client attribué avec succès.',
-      appel: {
-        user: freeUser.mail,
-        ticket: client.numero,
-        prestation: client.id_prestation.nom,
-        date: newAppel.date,
-        place: {
-          ref_place: place.ref_place,
-          numero: place.numero
+      if (freeUser) {
+        // Étape 5 : Trouver la place associée à l'utilisateur
+        const place = await Place.findOne({ user: freeUser._id });
+        if (!place) {
+          continue; // Passer au client suivant si aucune place n'est trouvée
         }
+
+        // Étape 6 : Créer un nouvel appel
+        const newAppel = new Appel({
+          user: freeUser._id,
+          liste: client._id,
+          date: new Date()
+        });
+
+        await newAppel.save();
+
+        // Étape 7 : Mettre à jour l'occupation de l'utilisateur à "inactive"
+        const occupation = await Occupation.findOne({
+          users: freeUser._id,
+          status: 'active'
+        });
+
+        if (occupation) {
+          occupation.status = 'inactive';
+          await occupation.save();
+        } else {
+          console.warn(`Occupation non trouvée pour l'utilisateur ${freeUser.mail}`);
+        }
+
+        // Étape 8 : Préparer la réponse
+        responseData = {
+          message: 'Client attribué avec succès.',
+          appel: {
+            user: freeUser.mail,
+            ticket: client.numero,
+            prestation: client.id_prestation.nom,
+            date: newAppel.date,
+            place: {
+              ref_place: place.ref_place,
+              numero: place.numero
+            }
+          }
+        };
+        assigned = true;
+        break; // Sortir de la boucle une fois qu'un client est attribué
       }
-    });
+    }
+
+    // Étape 9 : Vérifier si une attribution a été faite
+    if (!assigned) {
+      return res.status(404).json({ message: 'Aucun utilisateur "box" libre pour les prestations demandées.' });
+    }
+
+    // Étape 10 : Envoyer la réponse
+    res.status(201).json(responseData);
 
   } catch (error) {
     console.error('Erreur lors de l\'attribution du client:', error);

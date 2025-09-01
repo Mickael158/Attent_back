@@ -6,42 +6,43 @@ const roleMiddleware = require('../middleware/roleMiddleware');
 const router = express.Router();
 
 // Route pour créer une nouvelle entrée dans Liste
-// - Reçoit une référence (ref) dans le corps de la requête
-// - Vérifie l'existence de la prestation
-// - Génère un numéro unique (<ref>-<num>) pour le jour actuel
+// - Reçoit un nom de prestation dans le corps de la requête
+// - Vérifie l'existence de la prestation par son nom
+// - Génère un numéro unique (<ref>-<num>) pour le jour actuel, spécifique à chaque ref
 // - Vérifie l'unicité du numéro uniquement pour aujourd'hui
 router.post('/liste', refreshTokenMiddleware, roleMiddleware(['port']), async (req, res) => {
-  const { ref } = req.body;
-  console.log(`Requête POST /liste reçue avec ref: ${ref}`);
+  const { nom } = req.body;
+  console.log(`Requête POST /liste/liste reçue avec nom: ${nom}`);
   let numero; // Définir numero à l'extérieur du try pour le rendre accessible dans catch
 
   try {
-    // Vérifier que la référence est fournie
-    if (!ref) {
-      console.log('Erreur: Référence manquante dans le corps de la requête');
-      return res.status(400).json({ message: 'Référence de prestation requise.' });
+    // Vérifier que le nom est fourni
+    if (!nom) {
+      console.log('Erreur: Nom de prestation manquant dans le corps de la requête');
+      return res.status(400).json({ message: 'Nom de prestation requis.' });
     }
 
-    // Rechercher la prestation par sa référence
-    const prestation = await Prestation.findOne({ ref });
+    // Rechercher la prestation par son nom
+    const prestation = await Prestation.findOne({ nom });
     if (!prestation) {
-      console.log(`Erreur: Prestation non trouvée pour ref: ${ref}`);
-      return res.status(404).json({ message: `Prestation non trouvée pour la référence: ${ref}` });
+      console.log(`Erreur: Prestation non trouvée pour nom: ${nom}`);
+      return res.status(404).json({ message: `Prestation non trouvée pour le nom: ${nom}` });
     }
 
     // Obtenir la date actuelle sans l’heure
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Rechercher les entrées du jour pour cette prestation
+    // Rechercher les entrées du jour pour ce ref (ex. SAZ - REN-*)
+    const refPrefix = prestation.ref;
     const todayListes = await Liste.find({
-      id_prestation: prestation._id,
+      numero: { $regex: `^${refPrefix}-\\d+$` },
       dateHeure: { $gte: today },
     });
 
     // Génération du numéro
     const nextNum = todayListes.length > 0 ? todayListes.length + 1 : 1;
-    numero = `${prestation.ref}-${nextNum}`; // Définir numero
+    numero = `${refPrefix}-${nextNum}`; // Utiliser le ref de la prestation
 
     // Vérifier si le numéro existe déjà pour aujourd'hui
     const existingListe = await Liste.findOne({

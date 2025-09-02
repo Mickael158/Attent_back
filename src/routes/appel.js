@@ -5,6 +5,7 @@ const Liste = require('../models/Liste');
 const User = require('../models/User');
 const Role = require('../models/Role');
 const Tache = require('../models/Tache');
+const Prestation = require('../models/Prestation');
 const Occupation = require('../models/Occupation');
 const Place = require('../models/Place');
 const refreshTokenMiddleware = require('../middleware/refreshTokenMiddleware');
@@ -203,28 +204,63 @@ router.get('/clients-en-attente', refreshTokenMiddleware, roleMiddleware(['box']
   }
 });
 
-
 // Route pour les statistiques des clients reçus par mois
 router.get('/stats/clients-par-mois', refreshTokenMiddleware, roleMiddleware(['admin']), async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
-    
+    const { startDate, endDate, prestationId } = req.query;
+
     // Définir la plage de dates par défaut (12 derniers mois)
     const end = endDate ? new Date(endDate) : new Date();
     const start = startDate ? new Date(startDate) : new Date(new Date().setFullYear(end.getFullYear() - 1));
-    
+
+    // Ajuster la date de fin pour inclure toute la journée
+    end.setHours(23, 59, 59, 999);
+
     // S'assurer que les dates sont valides
     if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
       return res.status(400).json({ message: 'Plage de dates invalide.' });
     }
 
-    // Agrégation pour compter les appels par mois
-    const stats = await Appel.aggregate([
+    // Valider prestationId si fourni
+    if (prestationId && !mongoose.Types.ObjectId.isValid(prestationId)) {
+      return res.status(400).json({ message: 'ID de prestation invalide.' });
+    }
+
+    // Construire le pipeline d'agrégation
+    const matchStage = {
+      date: { $gte: start, $lte: end }
+    };
+
+    const pipeline = [
       {
-        $match: {
-          date: { $gte: start, $lte: end }
+        $match: matchStage
+      }
+    ];
+
+    // Si prestationId est fourni, ajouter un $lookup et un filtre
+    if (prestationId) {
+      pipeline.push(
+        {
+          $lookup: {
+            from: 'listes',
+            localField: 'liste',
+            foreignField: '_id',
+            as: 'liste'
+          }
+        },
+        {
+          $unwind: '$liste'
+        },
+        {
+          $match: {
+            'liste.id_prestation': new mongoose.Types.ObjectId(prestationId) // Utiliser 'new'
+          }
         }
-      },
+      );
+    }
+
+    // Agrégation pour compter les appels par mois
+    pipeline.push(
       {
         $group: {
           _id: {
@@ -237,7 +273,9 @@ router.get('/stats/clients-par-mois', refreshTokenMiddleware, roleMiddleware(['a
       {
         $sort: { '_id.year': 1, '_id.month': 1 }
       }
-    ]);
+    );
+
+    const stats = await Appel.aggregate(pipeline);
 
     // Formater les étiquettes (ex. "Jan 2024") et les données
     const labels = [];
@@ -255,15 +293,81 @@ router.get('/stats/clients-par-mois', refreshTokenMiddleware, roleMiddleware(['a
   }
 });
 
+// Route pour récupérer la liste des prestations
+router.get('/prestations', refreshTokenMiddleware, roleMiddleware(['admin']), async (req, res) => {
+  try {
+    const prestations = await Prestation.find().select('nom _id');
+    res.json(prestations);
+  } catch (error) {
+    console.error('Erreur lors de la récupération des prestations:', error);
+    res.status(500).json({ message: error.message || 'Erreur serveur lors de la récupération des prestations.' });
+  }
+});
+// router.get('/stats/clients-par-mois', refreshTokenMiddleware, roleMiddleware(['admin']), async (req, res) => {
+//   try {
+//     const { startDate, endDate } = req.query;
+
+//     // Définir la plage de dates par défaut (12 derniers mois)
+//     const end = endDate ? new Date(endDate) : new Date();
+//     const start = startDate ? new Date(startDate) : new Date(new Date().setFullYear(end.getFullYear() - 1));
+
+//     // Ajuster la date de fin pour inclure toute la journée
+//     end.setHours(23, 59, 59, 999); // Fin de la journée pour endDate
+
+//     // S'assurer que les dates sont valides
+//     if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
+//       return res.status(400).json({ message: 'Plage de dates invalide.' });
+//     }
+
+//     // Agrégation pour compter les appels par mois
+//     const stats = await Appel.aggregate([
+//       {
+//         $match: {
+//           date: { $gte: start, $lte: end } // Inclut startDate et endDate
+//         }
+//       },
+//       {
+//         $group: {
+//           _id: {
+//             year: { $year: '$date' },
+//             month: { $month: '$date' }
+//           },
+//           count: { $sum: 1 }
+//         }
+//       },
+//       {
+//         $sort: { '_id.year': 1, '_id.month': 1 }
+//       }
+//     ]);
+
+//     // Formater les étiquettes (ex. "Jan 2024") et les données
+//     const labels = [];
+//     const data = [];
+//     stats.forEach(stat => {
+//       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+//       labels.push(`${monthNames[stat._id.month - 1]} ${stat._id.year}`);
+//       data.push(stat.count);
+//     });
+
+//     res.json({ labels, data });
+//   } catch (error) {
+//     console.error('Erreur lors de la récupération des stats clients par mois:', error);
+//     res.status(500).json({ message: error.message || 'Erreur serveur lors de la récupération des stats.' });
+//   }
+// });
+
 // Route pour les statistiques des clients reçus par prestation
 router.get('/stats/clients-par-prestation', refreshTokenMiddleware, roleMiddleware(['admin']), async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    
+
     // Définir la plage de dates par défaut (12 derniers mois)
     const end = endDate ? new Date(endDate) : new Date();
     const start = startDate ? new Date(startDate) : new Date(new Date().setFullYear(end.getFullYear() - 1));
-    
+
+    // Ajuster la date de fin pour inclure toute la journée
+    end.setHours(23, 59, 59, 999); // Fin de la journée pour endDate
+
     // S'assurer que les dates sont valides
     if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
       return res.status(400).json({ message: 'Plage de dates invalide.' });
@@ -273,7 +377,7 @@ router.get('/stats/clients-par-prestation', refreshTokenMiddleware, roleMiddlewa
     const stats = await Appel.aggregate([
       {
         $match: {
-          date: { $gte: start, $lte: end }
+          date: { $gte: start, $lte: end } // Inclut startDate et endDate
         }
       },
       {

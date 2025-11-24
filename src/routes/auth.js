@@ -8,9 +8,17 @@ const { SECRET_KEY } = require('../config/config');
 const Role = require('../models/Role');
 
 router.post('/register', async (req, res) => {
-    const { mail, pwsd, nomRole } = req.body;
+    const { mail, pwsd, nomRole, adminPassword } = req.body;
 
-    // Validation des données d'entrée
+    // === VALIDATION DES RÔLES AUTORISÉS ===
+    const rolesAutorises = ['admin', 'box', 'affichage', 'port'];
+    if (!rolesAutorises.includes(nomRole)) {
+        return res.status(400).json({ 
+            message: `Rôle invalide. Rôles autorisés : ${rolesAutorises.join(', ')}` 
+        });
+    }
+
+    // === VALIDATION DES DONNÉES D'ENTRÉE ===
     if (!mail || !pwsd || !nomRole) {
         return res.status(400).json({ message: 'Email, mot de passe et rôle sont requis' });
     }
@@ -20,31 +28,66 @@ router.post('/register', async (req, res) => {
     if (pwsd.length < 6) {
         return res.status(400).json({ message: 'Le mot de passe doit contenir au moins 6 caractères' });
     }
-    // if (nomRole !== 'box' && nomRole !== 'bio') {
-    //     return res.status(400).json({ message: 'L\'inscription est uniquement autorisée pour le rôle box' });
-    // }
+
+    // === MOT DE PASSE ADMIN REQUIS POUR admin, affichage, port ===
+    const rolesRequiringAdminPassword = ['admin', 'affichage', 'port'];
+    if (rolesRequiringAdminPassword.includes(nomRole)) {
+        if (!adminPassword) {
+            return res.status(400).json({ 
+                message: `Mot de passe administrateur requis pour le rôle "${nomRole}"` 
+            });
+        }
+
+        const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+        if (!ADMIN_PASSWORD) {
+            return res.status(500).json({ 
+                message: 'Configuration administrateur manquante' 
+            });
+        }
+        if (adminPassword !== ADMIN_PASSWORD) {
+            return res.status(400).json({ 
+                message: 'Mot de passe administrateur incorrect' 
+            });
+        }
+    }
 
     try {
+        // Vérifie si l'utilisateur existe déjà
         const existingUser = await User.findOne({ mail });
         if (existingUser) {
             return res.status(400).json({ message: 'Cet email est déjà utilisé' });
         }
 
+        // Vérifie que le rôle existe en base
         const role = await Role.findOne({ nom: nomRole });
         if (!role) {
-            return res.status(400).json({ message: 'Rôle non trouvé' });
+            return res.status(400).json({ message: 'Rôle non trouvé en base de données' });
         }
 
+        // === DÉTERMINATION DE isValidated ===
+        const isValidated = rolesRequiringAdminPassword.includes(nomRole);
+
+        // Crée l'utilisateur
         const hashedPassword = await bcrypt.hash(pwsd, 10);
         const user = new User({
             mail,
             pwsd: hashedPassword,
             idRoles: role._id,
-            isValidated: false
+            isValidated // true pour admin, affichage, port ; false pour box
         });
         await user.save();
 
-        res.status(201).json({ message: 'Inscription réussie. En attente de validation par un administrateur' });
+        res.status(201).json({ 
+            message: isValidated 
+                ? 'Inscription réussie. Compte activé immédiatement.'
+                : 'Inscription réussie. En attente de validation par un administrateur',
+            user: {
+                _id: user._id,
+                mail: user.mail,
+                nomRole: nomRole,
+                isValidated: user.isValidated
+            }
+        });
     } catch (error) {
         console.error('Erreur lors de l\'inscription :', error);
         res.status(500).json({ message: 'Erreur serveur lors de l\'inscription' });
